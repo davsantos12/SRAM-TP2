@@ -219,8 +219,8 @@ void cleanup_thread(int period) {
                 {
                     std::lock_guard<std::mutex> lock(sources_mutex);
                     for (const auto& pdu : sources_map) {
-                        std::chrono::microseconds period_ms = std::chrono::microseconds(1000000 / (pdu.second.frequency * pdu.second.multiple));
-                        if (std::chrono::steady_clock::now() - pdu.second.timestamp > period_ms) {
+                        std::chrono::microseconds pdu_period = std::chrono::microseconds(1000000 / (pdu.second.frequency * pdu.second.multiple));
+                        if (std::chrono::steady_clock::now() - pdu.second.timestamp > pdu_period && pdu.second.sent) {
                             std::string source_id = pdu.second.identifier;
                             sources_map.erase(source_id);
                         }

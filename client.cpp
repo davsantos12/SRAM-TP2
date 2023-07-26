@@ -38,7 +38,11 @@ void display_sources(PDU_2 pdu_2) {
     std::cout << "------------------------------------" << std::endl;
     std::cout << "            LIST SOURCES            " << std::endl;
     std::cout << "------------------------------------" << std::endl;
-    std::cout << "Sources: " << pdu_2.active_sources << std::endl;
+    std::cout << "Sources: ";
+    for (size_t i = 0; i < strlen(pdu_2.active_sources); i++) {
+        std::cout << pdu_2.active_sources[i] << " ";
+    }
+    std::cout << std::endl;
     std::cout << "------------------------------------" << std::endl;
     std::cout << "Press ENTER to return.";
     std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
@@ -171,13 +175,13 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *D) 
                 pdu_2.id = choice;
                 strncpy(pdu_2.type, "play", sizeof(pdu_2.type));
                 display_chooser(input);
-                // std::cout << "input: " << input << std::endl;
                 memset(pdu_2.sub.source_id, '\0', sizeof(pdu_2.sub.source_id));
                 strncpy(pdu_2.sub.source_id, input.c_str(), sizeof(pdu_2.sub.source_id) - 1);
                 bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
                 if (bytes_sent == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
+
                 memset(input_char_array, '\0', sizeof(input_char_array));
                 std::strcpy(input_char_array, input.c_str());
                 system(CLEAR_COMMAND);
@@ -190,6 +194,8 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *D) 
                     }
                 }
                 display_thread.join();
+                std::cin.clear();
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                 break;
             }
             case 4:  // Stop(D)
