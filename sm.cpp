@@ -81,7 +81,7 @@ void send_pdu(const std::string ip, int port) {
         memset(&serverAddr, 0, sizeof(serverAddr));
 
         create_sender_socket(ip, port, sockfd, serverAddr);
-        std::cout << "socket created with port = " << serverAddr.sin_port << std::endl;
+        // std::cout << "socket created with port = " << serverAddr.sin_port << std::endl;
 
         while (true) {
             std::unique_lock<std::mutex> lock(sources_mutex);
@@ -188,7 +188,7 @@ void manage_client_requests(const std::string ip, int port) {
         memset(&serverAddr, 0, sizeof(serverAddr));
 
         create_receiver_socket(port, sockfd, serverAddr);
-        std::cout << "socket created with port = " << serverAddr.sin_port << std::endl;
+        // std::cout << "socket created with port = " << serverAddr.sin_port << std::endl;
 
         while (true) {
             memset(&clientAddr, 0, sizeof(clientAddr));
@@ -212,7 +212,7 @@ void manage_client_requests(const std::string ip, int port) {
     }
 }
 
-void cleanup_thread(std::chrono::seconds period) {
+void cleanup_thread(int period) {
     try {
         while (true) {
             if (!sources_map.empty()) {
@@ -240,17 +240,16 @@ int main() {
     /* std::signal(SIGINT, handleSIGINT);
     std::signal(SIGTSTP, handleSIGTSTP);
     std::signal(SIGTERM, handleSIGTERM); */
-
     try {
         std::thread receiver_thread(receive_pdu, 12345);
         std::thread sender_thread(send_pdu, "127.0.0.1", 12347);
         std::thread manager_thread(manage_client_requests, "127.0.0.1", 12347);
-        std::thread cleaner_thread(cleanup_thread, 5);
+        // std::thread cleaner_thread(cleanup_thread, 5);
 
         receiver_thread.join();
         sender_thread.join();
         manager_thread.join();
-        cleaner_thread.join();
+        // cleaner_thread.join();
     } catch (const std::exception& e) {
         std::cerr << "Exception in main: " << e.what() << std::endl;
         keep_running.store(false);

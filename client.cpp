@@ -62,14 +62,14 @@ void display_chooser(std::string &input) {
     std::cout << "------------------------------------" << std::endl;
 }
 
-void display_channel(PDU_2 pdu_2) {
+void display_sin_value(PDU_2 pdu_2) {
     for (size_t i = 0; i < pdu_2.pdu.value; i++) {
         std::cout << "*";
     }
     std::cout << std::endl;
 }
 
-void recv_pdu(char *D, int type, int sockfd, PDU_2 &pdu_2) {
+void recv_pdu(char *id, int type, int sockfd, PDU_2 &pdu_2) {
     // char buffer[1024];
     sockaddr_in clientAddr = {};
     socklen_t clientAddrLen = sizeof(clientAddr);
@@ -81,8 +81,19 @@ void recv_pdu(char *D, int type, int sockfd, PDU_2 &pdu_2) {
             break;
         }
         // std::memcpy(&pdu_2.id, buffer, sizeof(PDU_2));
-        if (std::strcmp(pdu_2.sub.client_id, D) == 0 && pdu_2.id == type) {
+        if (std::strcmp(pdu_2.sub.client_id, id) == 0 && pdu_2.id == type) {
             break;
+        }
+    }
+}
+
+void display_channel(PDU_2 &pdu_2, int sockfd, char *input_char_array, char *D, std::atomic_bool &exit) {
+    while (!exit) {
+        memset(&pdu_2, 0, sizeof(pdu_2));
+        recv_pdu(D, 0, sockfd, pdu_2);
+        // print_pdu_2(pdu_2);
+        if (std::strcmp(pdu_2.sub.source_id, input_char_array) == 0) {
+            display_sin_value(pdu_2);
         }
     }
 }
@@ -93,7 +104,7 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *D) 
     PDU_2 pdu_2;
     std::string input;
     ssize_t bytes_sent = 0;
-    char input_char_array[10];
+    char input_char_array[10], key;
     size_t length = strlen(D);
     size_t max_size = sizeof(pdu_2.sub.client_id);
 
@@ -150,6 +161,7 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *D) 
                 display_info(pdu_2.pdu);
                 break;
             case 3:  // Play(D)
+            {
                 memset(&pdu_2, 0, sizeof(pdu_2));
                 system(CLEAR_COMMAND);
                 if (length < max_size - 1) {
@@ -169,17 +181,17 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *D) 
                 memset(input_char_array, '\0', sizeof(input_char_array));
                 std::strcpy(input_char_array, input.c_str());
                 system(CLEAR_COMMAND);
-                while (true) {
-                    memset(&pdu_2, 0, sizeof(pdu_2));
-                    recv_pdu(D, 0, sockfd, pdu_2);
-                    // print_pdu_2(pdu_2);
-                    if (std::strcmp(pdu_2.sub.source_id, input_char_array) == 0) {
-                        display_channel(pdu_2);
-                    } else {
-                        std::cout << "Strings are not equal." << std::endl;
+                std::atomic<bool> exit(false);
+                std::thread display_thread(display_channel, std::ref(pdu_2), sockfd, input_char_array, D, std::ref(exit));
+                if (std::cin.peek() != EOF) {
+                    std::cin >> key;
+                    if (key == 'q') {
+                        exit.store(true);
                     }
                 }
+                display_thread.join();
                 break;
+            }
             case 4:  // Stop(D)
                 memset(&pdu_2, 0, sizeof(pdu_2));
                 system(CLEAR_COMMAND);
@@ -197,7 +209,6 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *D) 
                 }
                 break;
             case 5:  // Quit
-                std::cout << "Shutting down..." << std::endl;
                 quit = true;
                 break;
         }
@@ -205,10 +216,9 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *D) 
 }
 
 void handler(const std::string ip, int port, char *D) {
-    int sockfd, pdufd;
-    struct sockaddr_in serverAddr, clientAddr;
+    int sockfd;
+    struct sockaddr_in serverAddr;
     memset(&serverAddr, 0, sizeof(serverAddr));
-    socklen_t clientAddrLen = sizeof(clientAddr);
 
     create_sender_socket(ip, port, sockfd, serverAddr);
 
