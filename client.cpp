@@ -187,15 +187,16 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *D) 
                 system(CLEAR_COMMAND);
                 std::atomic<bool> exit(false);
                 std::thread display_thread(display_channel, std::ref(pdu_2), sockfd, input_char_array, D, std::ref(exit));
-                if (std::cin.peek() != EOF) {
-                    std::cin >> key;
-                    if (key == 'q') {
+                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                while (true) {
+                    if (std::cin.get() == 'q') {  // Check for q key
                         exit.store(true);
+                        break;
                     }
+                    std::cin.clear();
+                    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                 }
                 display_thread.join();
-                std::cin.clear();
-                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                 break;
             }
             case 4:  // Stop(D)

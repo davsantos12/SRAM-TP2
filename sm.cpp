@@ -7,28 +7,8 @@ std::mutex sources_mutex;    // Mutex for accessing the list of active pdu's
 std::mutex client_mutex;     // Mutex for accessing the list of subscribed clients
 std::condition_variable cv;  // Condition variable for signaling between threads
 
-int previous_sources_map_size = 0;
-int previous_subscriber_map_size = 0;
-
 std::unordered_map<std::string, PDU_1> sources_map;
 std::unordered_map<in_port_t, Subscriber> subscriber_list;
-
-// Signal handler for Ctrl+C (SIGINT)
-void handleSIGINT(int signal) {
-    keep_running.store(false);
-    cv.notify_all();  // Notify all threads to wake up
-}
-
-// Signal handler for Ctrl+Z (SIGTSTP)
-void handleSIGTSTP(int signal) {
-    keep_running.store(false);
-    cv.notify_all();  // Notify all threads to wake up
-}
-
-void handleSIGTERM(int signal) {
-    keep_running.store(false);
-    cv.notify_all();  // Notify all threads to wake up
-}
 
 void receive_pdu(int port) {
     try { /* Continuously listen for incoming PDUs from sources
@@ -40,7 +20,7 @@ void receive_pdu(int port) {
 
         create_receiver_socket(port, sockfd, serverAddr);
 
-        while (true) {
+        while (keep_running.load()) {
             memset(&clientAddr, 0, sizeof(clientAddr));
             socklen_t clientAddrLen = sizeof(clientAddr);
 
@@ -57,9 +37,6 @@ void receive_pdu(int port) {
             {
                 std::lock_guard<std::mutex> lock(sources_mutex);
                 sources_map[key] = pdu;
-                if (sources_map.size() != previous_sources_map_size) {
-                    previous_sources_map_size = sources_map.size();
-                }
             }
             new_notification.store(true);
             cv.notify_one();
@@ -83,7 +60,7 @@ void send_pdu(const std::string ip, int port) {
         create_sender_socket(ip, port, sockfd, serverAddr);
         // std::cout << "socket created with port = " << serverAddr.sin_port << std::endl;
 
-        while (true) {
+        while (keep_running.load()) {
             std::unique_lock<std::mutex> lock(sources_mutex);
             cv.wait(lock, [] { return !sources_map.empty() && !subscriber_list.empty() && new_notification.load(); });
             PDU_2 pdu;
@@ -113,6 +90,51 @@ void send_pdu(const std::string ip, int port) {
         }
     } catch (const std::exception& e) {
         std::cerr << "Exception in send_pdu: " << e.what() << std::endl;
+        keep_running.store(false);
+        cv.notify_all();
+    }
+}
+
+void send_monitor_data(const std::string ip, int port) {
+    try {
+        int sockfd;
+        struct sockaddr_in monitorAddr;
+        memset(&monitorAddr, 0, sizeof(monitorAddr));
+
+        create_sender_socket(ip, port, sockfd, monitorAddr);
+
+        int previous_sources_size = 0;
+        int previous_subscribers_size = 0;
+
+        while (keep_running.load()) {
+            int current_sources_size = 0;
+            int current_subscribers_size = 0;
+
+            {
+                std::lock_guard<std::mutex> lock(sources_mutex);
+                current_sources_size = sources_map.size();
+            }
+            {
+                std::lock_guard<std::mutex> lock(client_mutex);
+                current_subscribers_size = subscriber_list.size();
+            }
+            if (current_sources_size != previous_sources_size || current_subscribers_size != previous_subscribers_size) {
+                PDU_3 pdu_3;
+                pdu_3.n_sources = current_sources_size;
+                pdu_3.n_subscribers = current_subscribers_size;
+
+                ssize_t bytes_sent = sendto(sockfd, &pdu_3, sizeof(pdu_3), 0, (struct sockaddr*)&monitorAddr, sizeof(monitorAddr));
+                if (bytes_sent == -1) {
+                    std::cerr << "Failed to send PDU_3 to monitor." << std::endl;
+                }
+                previous_sources_size = current_sources_size;
+                previous_subscribers_size = current_subscribers_size;
+            }
+            std::this_thread::sleep_for(std::chrono::seconds(1));
+        }
+        close(sockfd);
+    } catch (const std::exception& e) {
+        std::cerr << "Exception in send_monitor_data thread: " << e.what() << std::endl;
         keep_running.store(false);
         cv.notify_all();
     }
@@ -190,7 +212,7 @@ void manage_client_requests(const std::string ip, int port) {
         create_receiver_socket(port, sockfd, serverAddr);
         // std::cout << "socket created with port = " << serverAddr.sin_port << std::endl;
 
-        while (true) {
+        while (keep_running.load()) {
             memset(&clientAddr, 0, sizeof(clientAddr));
             socklen_t clientAddrLen = sizeof(clientAddr);
             PDU_2 pdu_2;
@@ -214,7 +236,7 @@ void manage_client_requests(const std::string ip, int port) {
 
 void cleanup_thread(int period) {
     try {
-        while (true) {
+        while (keep_running.load()) {
             if (!sources_map.empty()) {
                 {
                     std::lock_guard<std::mutex> lock(sources_mutex);
@@ -237,18 +259,17 @@ void cleanup_thread(int period) {
 }
 
 int main() {
-    /* std::signal(SIGINT, handleSIGINT);
-    std::signal(SIGTSTP, handleSIGTSTP);
-    std::signal(SIGTERM, handleSIGTERM); */
     try {
         std::thread receiver_thread(receive_pdu, 12345);
         std::thread sender_thread(send_pdu, "127.0.0.1", 12347);
         std::thread manager_thread(manage_client_requests, "127.0.0.1", 12347);
+        std::thread monitor_thread(send_monitor_data, "127.0.0.1", 12365);
         // std::thread cleaner_thread(cleanup_thread, 5);
 
         receiver_thread.join();
         sender_thread.join();
         manager_thread.join();
+        monitor_thread.join();
         // cleaner_thread.join();
     } catch (const std::exception& e) {
         std::cerr << "Exception in main: " << e.what() << std::endl;
