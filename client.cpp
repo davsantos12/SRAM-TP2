@@ -91,26 +91,64 @@ void recv_pdu(char *id, int type, int sockfd, PDU_2 &pdu_2) {
     }
 }
 
-void display_channel(PDU_2 &pdu_2, int sockfd, char *input_char_array, char *D, std::atomic_bool &exit) {
+void display_channel(PDU_2 &pdu_2, int sockfd, std::string input, char *D, std::atomic_bool &exit) {
     while (!exit) {
         memset(&pdu_2, 0, sizeof(pdu_2));
         recv_pdu(D, 0, sockfd, pdu_2);
         // print_pdu_2(pdu_2);
-        if (std::strcmp(pdu_2.sub.source_id, input_char_array) == 0) {
+        if (std::strcmp(pdu_2.sub.source_id, input.c_str()) == 0) {
             display_sin_value(pdu_2);
         }
     }
 }
 
-void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *D) {
+void populate_pdu(PDU_2 &pdu, int id, std::string type, char *client_id, const std::string source_id = "\0", const std::string source_info_id = "\0") {
+    size_t length;
+    size_t max_size;
+
+    memset(&pdu, 0, sizeof(PDU_2));
+
+    pdu.id = id;
+    length = strlen(type.c_str());
+    max_size = sizeof(pdu.type);
+    if (length < max_size) {
+        memcpy(pdu.type, type.c_str(), length);
+        pdu.type[length] = '\0';
+    } else {
+        std::cerr << "Length of type bigger than allowed." << std::endl;
+    }
+    length = strlen(client_id);
+    max_size = sizeof(pdu.sub.client_id);
+    if (length < max_size) {
+        memcpy(pdu.sub.client_id, client_id, length);
+        pdu.sub.client_id[length] = '\0';
+    } else {
+        std::cerr << "Length of client_id bigger than allowed." << std::endl;
+    }
+    length = strlen(source_id.c_str());
+    max_size = sizeof(pdu.sub.source_id);
+    if (length < max_size) {
+        memcpy(pdu.sub.source_id, source_id.c_str(), length);
+        pdu.sub.source_id[length] = '\0';
+    } else {
+        std::cerr << "Length of source_id bigger than allowed." << std::endl;
+    }
+    length = strlen(source_info_id.c_str());
+    max_size = sizeof(pdu.pdu.identifier);
+    if (length < max_size) {
+        memcpy(pdu.pdu.identifier, source_info_id.c_str(), length);
+        pdu.pdu.identifier[length] = '\0';
+    } else {
+        std::cerr << "Length of source_info_id bigger than allowed." << std::endl;
+    }
+}
+
+void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *client_id) {
     int choice;
     bool quit = false;
     PDU_2 pdu_2;
     std::string input;
     ssize_t bytes_sent = 0;
-    char input_char_array[10], key;
-    size_t length = strlen(D);
-    size_t max_size = sizeof(pdu_2.sub.client_id);
 
     while (!quit) {
         // Clear the screen
@@ -131,62 +169,36 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *D) 
         // Process user's choice
         switch (choice) {
             case 1:  // List all
-                memset(&pdu_2, 0, sizeof(pdu_2));
                 system(CLEAR_COMMAND);
-                if (length < max_size - 1) {
-                    memcpy(pdu_2.sub.client_id, D, length);
-                    pdu_2.sub.client_id[length] = '\0';
-                }
-                pdu_2.id = choice;
-                strncpy(pdu_2.type, "list", sizeof(pdu_2.type));
+                populate_pdu(pdu_2, choice, "list", client_id);
                 if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
-                recv_pdu(D, choice, sockfd, pdu_2);
+                recv_pdu(client_id, choice, sockfd, pdu_2);
                 display_sources(pdu_2);
                 break;
             case 2:  // Info(D)
-                memset(&pdu_2, 0, sizeof(pdu_2));
                 system(CLEAR_COMMAND);
-                if (length < max_size - 1) {
-                    memcpy(pdu_2.sub.client_id, D, length);
-                    pdu_2.sub.client_id[length] = '\0';
-                }
-                pdu_2.id = choice;
-                strncpy(pdu_2.type, "info", sizeof(pdu_2.type));
                 display_chooser(input);
-                strncpy(pdu_2.pdu.identifier, input.c_str(), sizeof(pdu_2.pdu.identifier));
-                bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
-                if (bytes_sent == -1) {
+                populate_pdu(pdu_2, choice, "info", client_id, "\0", input);
+                if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
-                recv_pdu(D, choice, sockfd, pdu_2);
+                recv_pdu(client_id, choice, sockfd, pdu_2);
                 system(CLEAR_COMMAND);
                 display_info(pdu_2.pdu);
                 break;
             case 3:  // Play(D)
             {
-                memset(&pdu_2, 0, sizeof(pdu_2));
                 system(CLEAR_COMMAND);
-                if (length < max_size - 1) {
-                    memcpy(pdu_2.sub.client_id, D, length);
-                    pdu_2.sub.client_id[length] = '\0';
-                }
-                pdu_2.id = choice;
-                strncpy(pdu_2.type, "play", sizeof(pdu_2.type));
                 display_chooser(input);
-                memset(pdu_2.sub.source_id, '\0', sizeof(pdu_2.sub.source_id));
-                strncpy(pdu_2.sub.source_id, input.c_str(), sizeof(pdu_2.sub.source_id) - 1);
-                bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
-                if (bytes_sent == -1) {
+                populate_pdu(pdu_2, choice, "play", client_id, input, "\0");
+                if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
-
-                memset(input_char_array, '\0', sizeof(input_char_array));
-                std::strcpy(input_char_array, input.c_str());
                 system(CLEAR_COMMAND);
                 std::atomic<bool> exit(false);
-                std::thread display_thread(display_channel, std::ref(pdu_2), sockfd, input_char_array, D, std::ref(exit));
+                std::thread display_thread(display_channel, std::ref(pdu_2), sockfd, input, client_id, std::ref(exit));
                 std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
                 while (true) {
                     if (std::cin.get() == 'q') {  // Check for q key
@@ -200,18 +212,10 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *D) 
                 break;
             }
             case 4:  // Stop(D)
-                memset(&pdu_2, 0, sizeof(pdu_2));
                 system(CLEAR_COMMAND);
-                if (length < max_size - 1) {
-                    memcpy(pdu_2.sub.client_id, D, length);
-                    pdu_2.sub.client_id[length] = '\0';
-                }
-                pdu_2.id = choice;
-                strncpy(pdu_2.type, "stop", sizeof(pdu_2.type));
                 display_chooser(input);
-                strncpy(pdu_2.pdu.identifier, input.c_str(), sizeof(pdu_2.pdu.identifier));
-                bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr));
-                if (bytes_sent == -1) {
+                populate_pdu(pdu_2, choice, "stop", client_id, "\0", input);
+                if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
                 break;
