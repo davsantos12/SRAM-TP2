@@ -57,7 +57,6 @@ void handler(std::string filename, char* D) {
                 PDU_1 pdu = generate_pdu(D, i, P, F, N, M);
                 print_pdu_1(pdu);
                 int sent_bytes = sendto(sockfd, &pdu, sizeof(pdu), 0, (struct sockaddr*)&server, sizeof(server));
-                std::cout << "Sent bytes: " << sent_bytes << std::endl;
                 std::this_thread::sleep_for(std::chrono::microseconds(1000000 / (F * N)));
             }
         }

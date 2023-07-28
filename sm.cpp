@@ -242,9 +242,11 @@ void cleanup_thread(int period) {
                     std::lock_guard<std::mutex> lock(sources_mutex);
                     for (const auto& pdu : sources_map) {
                         std::chrono::microseconds pdu_period = std::chrono::microseconds(1000000 / (pdu.second.frequency * pdu.second.multiple));
+                        std::cout << "pdu_period: " << pdu_period.count() << std::endl;
                         if (std::chrono::steady_clock::now() - pdu.second.timestamp > pdu_period && pdu.second.sent) {
-                            std::string source_id = pdu.second.identifier;
-                            sources_map.erase(source_id);
+                            std::cout << "pdu expired." << std::endl;
+                            // std::string source_id = pdu.second.identifier;
+                            // sources_map.erase(source_id);
                         }
                     }
                 }
@@ -264,13 +266,13 @@ int main() {
         std::thread sender_thread(send_pdu, "127.0.0.1", 12347);
         std::thread manager_thread(manage_client_requests, "127.0.0.1", 12347);
         std::thread monitor_thread(send_monitor_data, "127.0.0.1", 12365);
-        // std::thread cleaner_thread(cleanup_thread, 5);
+        std::thread cleaner_thread(cleanup_thread, 5);
 
         receiver_thread.join();
         sender_thread.join();
         manager_thread.join();
         monitor_thread.join();
-        // cleaner_thread.join();
+        cleaner_thread.join();
     } catch (const std::exception& e) {
         std::cerr << "Exception in main: " << e.what() << std::endl;
         keep_running.store(false);
