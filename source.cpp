@@ -19,7 +19,7 @@ PDU_1 generate_pdu(char* id, int i, int P, int F, int N, int M) {
     pdu.period = P;
     pdu.max_period = M;
     pdu.sent = false;
-    pdu.timestamp = std::chrono::steady_clock::now();
+    pdu.timestamp = std::chrono::system_clock::now();
 
     return pdu;
 }
@@ -56,6 +56,7 @@ void handler(std::string filename, char* D) {
             for (int i = 0; i < Fa; i++) {
                 PDU_1 pdu = generate_pdu(D, i, P, F, N, M);
                 print_pdu_1(pdu);
+                std::cout << std::endl;
                 int sent_bytes = sendto(sockfd, &pdu, sizeof(pdu), 0, (struct sockaddr*)&server, sizeof(server));
                 std::this_thread::sleep_for(std::chrono::microseconds(1000000 / (F * N)));
             }

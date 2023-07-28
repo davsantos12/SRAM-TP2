@@ -43,7 +43,7 @@ struct PDU_1 {
     int frequency;                                    // frequência
     int multiple;                                     // amostragem
     int max_period;                                   // número máximo de períodos
-    std::chrono::steady_clock::time_point timestamp;  // timestamp atual
+    std::chrono::system_clock::time_point timestamp;  // timestamp atual
     bool sent;
 };
 
@@ -109,6 +109,8 @@ void print_pdu_1(const PDU_1& pdu) {
     std::cout << "Frequency: " << pdu.frequency << std::endl;
     std::cout << "Multiple: " << pdu.multiple << std::endl;
     std::cout << "Max Period: " << pdu.max_period << std::endl;
+    std::time_t timestamp = std::chrono::system_clock::to_time_t(pdu.timestamp);
+    std::cout << "Timestamp: " << std::put_time(std::localtime(&timestamp), "%H:%M:%S") << std::endl;
 }
 
 void print_pdu_2(const PDU_2& pdu) {

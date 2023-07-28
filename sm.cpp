@@ -237,17 +237,20 @@ void manage_client_requests(const std::string ip, int port) {
 void cleanup_thread(int period) {
     try {
         while (keep_running.load()) {
+            std::chrono::microseconds tolerance(200);
+            std::vector<std::string> sources_id;
             if (!sources_map.empty()) {
                 {
                     std::lock_guard<std::mutex> lock(sources_mutex);
                     for (const auto& pdu : sources_map) {
                         std::chrono::microseconds pdu_period = std::chrono::microseconds(1000000 / (pdu.second.frequency * pdu.second.multiple));
-                        std::cout << "pdu_period: " << pdu_period.count() << std::endl;
-                        if (std::chrono::steady_clock::now() - pdu.second.timestamp > pdu_period && pdu.second.sent) {
-                            std::cout << "pdu expired." << std::endl;
-                            // std::string source_id = pdu.second.identifier;
-                            // sources_map.erase(source_id);
+                        if (std::chrono::system_clock::now() - pdu.second.timestamp > pdu_period + tolerance) {
+                            std::string source_id = pdu.second.identifier;
+                            sources_id.push_back(source_id);
                         }
+                    }
+                    for (const auto& id : sources_id) {
+                        sources_map.erase(id);
                     }
                 }
             }
