@@ -1,5 +1,10 @@
 #include "api.h"
 
+std::mutex screen_mutex;
+std::condition_variable cv;
+
+std::atomic_bool confirmation_showing(false);
+
 void display_menu() {
     std::cout << "------------------------------------" << std::endl;
     std::cout << "            MENU OPTIONS            " << std::endl;
@@ -14,6 +19,8 @@ void display_menu() {
 }
 
 void display_info(PDU_1 pdu_1) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+
     std::cout << "------------------------------------" << std::endl;
     std::cout << "            INFORMATION             " << std::endl;
     std::cout << "------------------------------------" << std::endl;
@@ -23,14 +30,12 @@ void display_info(PDU_1 pdu_1) {
     std::cout << "Max Period: " << pdu_1.max_period << std::endl;
     std::cout << "------------------------------------" << std::endl;
     std::cout << "Press ENTER to return.";
-    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    std::cout.flush();
 
     while (true) {
-        if (std::cin.get() == '\n') {  // Check for Enter key
+        if (is_key_pressed() && get_char() == '\n') {  // Check for Enter key
             break;
         }
-        std::cin.clear();
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
     }
 }
 
@@ -45,14 +50,13 @@ void display_sources(PDU_2 pdu_2) {
     std::cout << std::endl;
     std::cout << "------------------------------------" << std::endl;
     std::cout << "Press ENTER to return.";
-    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    std::cout.flush();
 
     while (true) {
-        if (std::cin.get() == '\n') {  // Check for Enter key
+        if (is_key_pressed() && get_char() == '\n') {  // Check for Enter key
             break;
         }
-        std::cin.clear();
-        std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
 
@@ -64,6 +68,52 @@ void display_chooser(std::string &input) {
     std::cin >> input;
     std::cin.clear();
     std::cout << "------------------------------------" << std::endl;
+    std::cout.flush();
+}
+
+void display_confirmation() {
+    std::cout << "------------------------------------" << std::endl;
+    std::cout << "      ARE YOU STILL WATCHING?       " << std::endl;
+    std::cout << "------------------------------------" << std::endl;
+    std::cout << "                                    " << std::endl;
+    std::cout << "      Press ENTER to continue.      " << std::endl;
+    std::cout << "                                    " << std::endl;
+    std::cout << "------------------------------------" << std::endl;
+    std::cout.flush();
+}
+
+void still_watching(int period, std::atomic_bool &exit) {
+    auto last_time = std::chrono::steady_clock::now();
+    while (!exit) {
+        if (last_time + std::chrono::seconds(period) > std::chrono::steady_clock::now()) {
+            std::this_thread::sleep_for(std::chrono::seconds(period));
+            bool stop = true;
+            int seconds = 0;
+            confirmation_showing.store(true);
+            {
+                std::unique_lock<std::mutex> lock(screen_mutex);
+                system(CLEAR_COMMAND);
+                display_confirmation();
+                while (seconds < 10) {
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                    seconds++;
+                    if (is_key_pressed() && get_char() == '\n') {
+                        stop = false;
+                        last_time = std::chrono::steady_clock::now();
+                        break;
+                    }
+                }
+                confirmation_showing.store(false);
+            }
+            if (stop) {
+                exit.store(true);
+                cv.notify_all();
+                break;
+            }
+            cv.notify_all();
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    }
 }
 
 void display_sin_value(PDU_2 pdu_2) {
@@ -73,8 +123,7 @@ void display_sin_value(PDU_2 pdu_2) {
     std::cout << std::endl;
 }
 
-void recv_pdu(char *id, int type, int sockfd, PDU_2 &pdu_2) {
-    // char buffer[1024];
+void recv_pdu(char *client_id, int type, int sockfd, PDU_2 &pdu_2) {
     sockaddr_in clientAddr = {};
     socklen_t clientAddrLen = sizeof(clientAddr);
 
@@ -84,20 +133,24 @@ void recv_pdu(char *id, int type, int sockfd, PDU_2 &pdu_2) {
             std::cerr << "Failed to receive response from server" << std::endl;
             break;
         }
-        // std::memcpy(&pdu_2.id, buffer, sizeof(PDU_2));
-        if (std::strcmp(pdu_2.sub.client_id, id) == 0 && pdu_2.id == type) {
+        if (std::strcmp(pdu_2.sub.client_id, client_id) == 0 && pdu_2.id == type) {
             break;
         }
     }
 }
 
-void display_channel(PDU_2 &pdu_2, int sockfd, std::string input, char *D, std::atomic_bool &exit) {
+void display_channel(PDU_2 &pdu_2, int sockfd, std::string input, char *client_id, std::atomic_bool &exit) {
     while (!exit) {
-        memset(&pdu_2, 0, sizeof(pdu_2));
-        recv_pdu(D, 0, sockfd, pdu_2);
-        // print_pdu_2(pdu_2);
-        if (std::strcmp(pdu_2.sub.source_id, input.c_str()) == 0) {
-            display_sin_value(pdu_2);
+        {
+            std::unique_lock<std::mutex> lock(screen_mutex);
+            // Wait if still watching confirmation is using the screen
+            cv.wait(lock, [] { return !confirmation_showing; });
+
+            memset(&pdu_2, 0, sizeof(pdu_2));
+            recv_pdu(client_id, 0, sockfd, pdu_2);
+            if (std::strcmp(pdu_2.sub.source_id, input.c_str()) == 0) {
+                display_sin_value(pdu_2);
+            }
         }
     }
 }
@@ -162,7 +215,7 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *cli
         while (std::cin.fail() || choice < 1 || choice > 5) {
             std::cin.clear();
             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-            std::cout << "Invalid input, Please try again: ";
+            std::cout << "Invalid input, please try again: ";
             std::cin >> choice;
         }
 
@@ -199,16 +252,16 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *cli
                 system(CLEAR_COMMAND);
                 std::atomic<bool> exit(false);
                 std::thread display_thread(display_channel, std::ref(pdu_2), sockfd, input, client_id, std::ref(exit));
-                std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
-                while (true) {
-                    if (std::cin.get() == 'q') {  // Check for q key
+                std::thread still_watching_thread(still_watching, 10, std::ref(exit));
+                while (!exit.load()) {
+                    if (is_key_pressed() && get_char() == 'q') {  // Check for q key
                         exit.store(true);
                         break;
                     }
-                    std::cin.clear();
-                    std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+                    std::this_thread::sleep_for(std::chrono::microseconds(100));
                 }
                 display_thread.join();
+                still_watching_thread.join();
                 break;
             }
             case 4:  // Stop(D)
@@ -226,14 +279,14 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *cli
     }
 }
 
-void handler(const std::string ip, int port, char *D) {
+void handler(const std::string ip, int port, char *client_id) {
     int sockfd;
     struct sockaddr_in serverAddr;
     memset(&serverAddr, 0, sizeof(serverAddr));
 
     create_sender_socket(ip, port, sockfd, serverAddr);
 
-    menu_handler(port, sockfd, serverAddr, D);
+    menu_handler(port, sockfd, serverAddr, client_id);
 
     close(sockfd);
 
@@ -245,7 +298,9 @@ int main(int argc, char *argv[]) {
     std::string program_name = program_path.filename().string();
     char *program_name_ptr = new char[program_name.length() + 1];
     std::strcpy(program_name_ptr, program_name.c_str());
+
     handler("127.0.0.1", 12347, program_name_ptr);
+
     delete[] program_name_ptr;
     return 0;
 }
