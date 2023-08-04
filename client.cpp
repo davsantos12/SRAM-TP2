@@ -53,10 +53,10 @@ void display_sources(PDU_2 pdu_2) {
     std::cout.flush();
 
     while (true) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
         if (is_key_pressed() && get_char() == '\n') {  // Check for Enter key
             break;
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
 
@@ -85,34 +85,35 @@ void display_confirmation() {
 void still_watching(int period, std::atomic_bool &exit) {
     auto last_time = std::chrono::steady_clock::now();
     while (!exit) {
-        if (last_time + std::chrono::seconds(period) > std::chrono::steady_clock::now()) {
-            std::this_thread::sleep_for(std::chrono::seconds(period));
+        if (std::chrono::steady_clock::now() - std::chrono::seconds(period) >= last_time) {
+            last_time = std::chrono::steady_clock::now();
             bool stop = true;
-            int seconds = 0;
             confirmation_showing.store(true);
             {
                 std::unique_lock<std::mutex> lock(screen_mutex);
                 system(CLEAR_COMMAND);
                 display_confirmation();
-                while (seconds < 10) {
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
-                    seconds++;
+                for (size_t seconds = 0; seconds < 10; seconds++) {
                     if (is_key_pressed() && get_char() == '\n') {
                         stop = false;
-                        last_time = std::chrono::steady_clock::now();
                         break;
                     }
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
                 }
-                confirmation_showing.store(false);
+                system(CLEAR_COMMAND);
             }
             if (stop) {
                 exit.store(true);
                 cv.notify_all();
-                break;
             }
+            confirmation_showing.store(false);
             cv.notify_all();
         }
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        if (is_key_pressed() && get_char() == 'q') {  // Check for q key
+            exit.store(true);
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 }
 
@@ -253,13 +254,6 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *cli
                 std::atomic<bool> exit(false);
                 std::thread display_thread(display_channel, std::ref(pdu_2), sockfd, input, client_id, std::ref(exit));
                 std::thread still_watching_thread(still_watching, 10, std::ref(exit));
-                while (!exit.load()) {
-                    if (is_key_pressed() && get_char() == 'q') {  // Check for q key
-                        exit.store(true);
-                        break;
-                    }
-                    std::this_thread::sleep_for(std::chrono::microseconds(100));
-                }
                 display_thread.join();
                 still_watching_thread.join();
                 break;
