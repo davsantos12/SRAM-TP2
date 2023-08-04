@@ -1,10 +1,16 @@
 #ifndef API_H
 #define API_H
 
+#ifdef _WIN32
+#include <conio.h>
+#else
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <termios.h>
 #include <unistd.h>
+#endif
 
 #include <atomic>
 #include <chrono>
@@ -126,4 +132,45 @@ void print_pdu_2(const PDU_2& pdu) {
     std::cout << "Subscriber port: " << port << std::endl;
     print_pdu_1(pdu.pdu);
 }
+
+bool is_key_pressed() {
+#ifdef _WIN32
+    return _kbhit() != 0;
+#else
+    struct timeval tv;
+    fd_set fds;
+    tv.tv_sec = 0;
+    tv.tv_usec = 0;
+    FD_ZERO(&fds);
+    FD_SET(STDIN_FILENO, &fds);
+    select(STDIN_FILENO + 1, &fds, nullptr, nullptr, &tv);
+    return FD_ISSET(STDIN_FILENO, &fds) != 0;
+#endif
+}
+
+char get_char() {
+#ifdef _WIN32
+    return _getchar();
+#else
+    char buf = 0;
+    struct termios old;
+    fflush(stdout);
+    if (tcgetattr(0, &old) < 0)
+        perror("tcsetattr()");
+    old.c_lflag &= ~ICANON;
+    old.c_lflag &= ~ECHO;
+    old.c_cc[VMIN] = 1;
+    old.c_cc[VTIME] = 0;
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &old) < 0)
+        perror("tcsetattr ICANON");
+    if (read(STDIN_FILENO, &buf, 1) < 0)
+        perror("read()");
+    old.c_lflag |= ICANON;
+    old.c_lflag |= ECHO;
+    if (tcsetattr(STDIN_FILENO, TCSADRAIN, &old) < 0)
+        perror("tcsetattr ~ICANON");
+    return buf;
+#endif
+}
+
 #endif
