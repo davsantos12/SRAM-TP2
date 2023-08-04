@@ -61,19 +61,21 @@ void send_pdu(const std::string ip, int port) {
         // std::cout << "socket created with port = " << serverAddr.sin_port << std::endl;
 
         while (keep_running.load()) {
-            std::unique_lock<std::mutex> lock(sources_mutex);
-            cv.wait(lock, [] { return !sources_map.empty() && !subscriber_list.empty() && new_notification.load(); });
-            PDU_2 pdu;
+            {
+                std::unique_lock<std::mutex> lock(sources_mutex);
+                cv.wait(lock, [] { return !sources_map.empty() && !subscriber_list.empty() && new_notification.load(); });
+                PDU_2 pdu;
 
-            for (const auto& subscriber : subscriber_list) {
-                if (sources_map.find(subscriber.second.source_id) != sources_map.end()) {
-                    if (sources_map[subscriber.second.source_id].sent == false) {
+                for (auto& subscriber : subscriber_list) {
+                    auto& source = sources_map[subscriber.second.source_id];
+                    if (source.sent == false && subscriber.second.credits > 0) {
                         pdu.id = 0;
                         char type[] = "data";
                         size_t length = strlen(type);
                         memcpy(pdu.type, type, length);
                         pdu.type[length] = '\0';
                         pdu.pdu = sources_map[subscriber.second.source_id];
+                        subscriber.second.credits -= 1;
                         pdu.sub = subscriber.second;
                         // print_pdu_2(pdu);
                         ssize_t bytes_sent = sendto(sockfd, &pdu, sizeof(pdu), 0, (struct sockaddr*)&subscriber.second.clientAddr, sizeof(subscriber.second.clientAddr));
@@ -82,11 +84,10 @@ void send_pdu(const std::string ip, int port) {
                         }
                     }
                 }
-            }
-            sources_map[pdu.sub.source_id].sent = true;
+                sources_map[pdu.sub.source_id].sent = true;
 
-            new_notification.store(false);
-            lock.unlock();
+                new_notification.store(false);
+            }
         }
     } catch (const std::exception& e) {
         std::cerr << "Exception in send_pdu: " << e.what() << std::endl;
@@ -186,6 +187,7 @@ void process_request(PDU_2 pdu_2, int sockfd) {  // Process user requests
             // Adds subscriber to subscriber list and notifies sender thread to send to new sub.
             {
                 std::lock_guard<std::mutex> lock(client_mutex);
+                pdu_2.sub.credits = 100;
                 subscriber_list[pdu_2.sub.clientAddr.sin_port] = pdu_2.sub;
             }
             cv.notify_one();
@@ -239,9 +241,10 @@ void cleanup_thread(int period) {
         while (keep_running.load()) {
             std::chrono::microseconds tolerance(200);
             std::vector<std::string> sources_id;
-            if (!sources_map.empty()) {
-                {
-                    std::lock_guard<std::mutex> lock(sources_mutex);
+            std::vector<in_port_t> sub_id;
+            {
+                std::lock_guard<std::mutex> lock(sources_mutex);
+                if (!sources_map.empty()) {
                     for (const auto& pdu : sources_map) {
                         std::chrono::microseconds pdu_period = std::chrono::microseconds(1000000 / (pdu.second.frequency * pdu.second.multiple));
                         if (std::chrono::system_clock::now() - pdu.second.timestamp > pdu_period + tolerance) {
@@ -251,6 +254,19 @@ void cleanup_thread(int period) {
                     }
                     for (const auto& id : sources_id) {
                         sources_map.erase(id);
+                    }
+                }
+            }
+            {
+                std::lock_guard<std::mutex> lock(client_mutex);
+                if (!subscriber_list.empty()) {
+                    for (const auto& sub : subscriber_list) {
+                        if (sub.second.credits == 0) {
+                            sub_id.push_back(sub.first);
+                        }
+                    }
+                    for (const auto& id : sub_id) {
+                        subscriber_list.erase(id);
                     }
                 }
             }
@@ -269,7 +285,7 @@ int main() {
         std::thread sender_thread(send_pdu, "127.0.0.1", 12347);
         std::thread manager_thread(manage_client_requests, "127.0.0.1", 12347);
         std::thread monitor_thread(send_monitor_data, "127.0.0.1", 12365);
-        std::thread cleaner_thread(cleanup_thread, 5);
+        std::thread cleaner_thread(cleanup_thread, 1);
 
         receiver_thread.join();
         sender_thread.join();

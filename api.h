@@ -38,6 +38,7 @@
 struct Subscriber {
     char client_id[10];  // identificador do cliente
     char source_id[10];  // identificador da source subscrita
+    int credits;
     struct sockaddr_in clientAddr;
 };
 
@@ -130,6 +131,7 @@ void print_pdu_2(const PDU_2& pdu) {
     std::cout << "Subscriber ip: " << ip_address << std::endl;
     unsigned short port = ntohs(pdu.sub.clientAddr.sin_port);
     std::cout << "Subscriber port: " << port << std::endl;
+    std::cout << "Subscriber credits: " << pdu.sub.credits << std::endl;
     print_pdu_1(pdu.pdu);
 }
 
