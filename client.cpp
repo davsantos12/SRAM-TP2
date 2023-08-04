@@ -256,6 +256,13 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *cli
                 std::thread still_watching_thread(still_watching, 10, std::ref(exit));
                 display_thread.join();
                 still_watching_thread.join();
+                if (exit) {
+                    populate_pdu(pdu_2, 4, "stop", client_id, "\0", input);
+                    if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
+                        std::cerr << "Failed to send response to client." << std::endl;
+                    }
+                }
+
                 break;
             }
             case 4:  // Stop(D)
