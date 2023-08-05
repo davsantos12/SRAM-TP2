@@ -13,7 +13,11 @@ PDU_1 generate_pdu(char* id, int i, int P, int F, int N, int M) {
         pdu.identifier[length] = '\0';
     }
     pdu.i = i;
-    pdu.value = generate_sample(i, N);
+    if (P == 0) {
+        pdu.value = 0;
+    } else {
+        pdu.value = generate_sample(i, N);
+    }
     pdu.frequency = F;
     pdu.multiple = N;
     pdu.period = P;
@@ -43,6 +47,7 @@ void read_config_file(std::string filename, std::string& IP, int& F, int& N, int
 
 void handler(std::string filename, char* D) {
     std::string IP;
+    bool first_iteration = true;
     int F, N, M, port, sockfd;
     struct sockaddr_in server;
 
@@ -52,7 +57,8 @@ void handler(std::string filename, char* D) {
 
     int Fa = F * N;
     while (true) {
-        for (int P = 0; P <= M; P++) {
+        int start_p = first_iteration ? 0 : 1;
+        for (int P = start_p; P <= M; P++) {
             for (int i = 0; i < Fa; i++) {
                 PDU_1 pdu = generate_pdu(D, i, P, F, N, M);
                 print_pdu_1(pdu);
@@ -61,6 +67,7 @@ void handler(std::string filename, char* D) {
                 std::this_thread::sleep_for(std::chrono::microseconds(1000000 / (F * N)));
             }
         }
+        first_iteration = false;
     }
     close(sockfd);
 }
