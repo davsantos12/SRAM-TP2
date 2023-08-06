@@ -64,11 +64,12 @@ void send_pdu(const std::string ip, int port) {
             {
                 std::unique_lock<std::mutex> lock(sources_mutex);
                 cv.wait(lock, [] { return !sources_map.empty() && !subscriber_list.empty() && new_notification.load(); });
+                std::unique_lock<std::mutex> sub_lock(client_mutex);
                 PDU_2 pdu;
 
                 for (auto& subscriber : subscriber_list) {
                     auto& source = sources_map[subscriber.second.source_id];
-                    if (source.sent == false && subscriber.second.credits > 0) {
+                    if (source.sent == false && subscriber.second.credits > 0 && pdu.pdu.period != 0) {
                         pdu.id = 0;
                         char type[] = "data";
                         size_t length = strlen(type);
@@ -84,6 +85,7 @@ void send_pdu(const std::string ip, int port) {
                         }
                     }
                 }
+                sub_lock.unlock();
                 sources_map[pdu.sub.source_id].sent = true;
 
                 new_notification.store(false);
@@ -157,7 +159,25 @@ void get_sources_list(PDU_2& pdu_2) {  // Gets list of active sources and stores
     pdu_2.active_sources[i] = '\0';
 }
 
-void process_request(PDU_2 pdu_2, int sockfd) {  // Process user requests
+void send_ack(PDU_2& pdu_2, int sockfd) {
+    std::string type("ack");
+    size_t length = strlen(type.c_str());
+    size_t max_size = sizeof(pdu_2.type);
+    size_t bytes_sent;
+    pdu_2.id = 5;
+    if (length < max_size) {
+        memcpy(pdu_2.type, type.c_str(), length);
+        pdu_2.type[length] = '\0';
+    } else {
+        std::cerr << "Length of type bigger than allowed." << std::endl;
+    }
+    bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr*)&pdu_2.sub.clientAddr, sizeof(pdu_2.sub.clientAddr));
+    if (bytes_sent == -1) {
+        std::cerr << "Failed to send response to client." << std::endl;
+    }
+}
+
+void process_request(PDU_2 pdu_2, int sockfd, int credits) {  // Process user requests
     ssize_t bytes_sent = 0;
     PDU_1 pdu;
     switch (pdu_2.id) {
@@ -186,17 +206,34 @@ void process_request(PDU_2 pdu_2, int sockfd) {  // Process user requests
         case 3:
             // Adds subscriber to subscriber list and notifies sender thread to send to new sub.
             {
-                std::lock_guard<std::mutex> lock(client_mutex);
-                pdu_2.sub.credits = 100;
-                subscriber_list[pdu_2.sub.clientAddr.sin_port] = pdu_2.sub;
+                std::unique_lock<std::mutex> source_lock(sources_mutex);
+                if (sources_map.count(pdu_2.sub.source_id) > 0) {
+                    pdu_2.sub.credits = 100;
+                    std::unique_lock<std::mutex> sub_lock(client_mutex);
+                    if (subscriber_list.count(pdu_2.sub.clientAddr.sin_port) > 0) {
+                        subscriber_list[pdu_2.sub.clientAddr.sin_port].credits = 100;
+                        send_ack(pdu_2, sockfd);
+                        sub_lock.unlock();
+                        source_lock.unlock();
+                    } else {
+                        subscriber_list[pdu_2.sub.clientAddr.sin_port] = pdu_2.sub;
+                        send_ack(pdu_2, sockfd);
+                        sub_lock.unlock();
+                        source_lock.unlock();
+                    }
+                    cv.notify_one();
+                }
             }
-            cv.notify_one();
             break;
         case 4:
             // Removes subscribers
             {
-                std::lock_guard<std::mutex> lock(client_mutex);
-                subscriber_list.erase(pdu_2.sub.clientAddr.sin_port);
+                std::unique_lock<std::mutex> lock(client_mutex);
+                if (subscriber_list.count(pdu_2.sub.clientAddr.sin_port) > 0) {
+                    subscriber_list.erase(pdu_2.sub.clientAddr.sin_port);
+                    send_ack(pdu_2, sockfd);
+                    lock.unlock();
+                }
             }
             break;
         default:
@@ -204,7 +241,7 @@ void process_request(PDU_2 pdu_2, int sockfd) {  // Process user requests
     }
 }
 
-void manage_client_requests(const std::string ip, int port) {
+void manage_client_requests(const std::string ip, int port, int credits) {
     try { /*  Listen for client commands (e.g., list, info(D), play(D), stop(D))
           Update the list of subscribed clients based on commands received */
         int sockfd;
@@ -226,7 +263,7 @@ void manage_client_requests(const std::string ip, int port) {
             }
             memcpy(&pdu_2.sub.clientAddr, &clientAddr, sizeof(clientAddr));
             // print_pdu_2(pdu_2);
-            process_request(pdu_2, sockfd);
+            process_request(pdu_2, sockfd, credits);
         }
         close(sockfd);
     } catch (const std::exception& e) {
@@ -283,7 +320,7 @@ int main() {
     try {
         std::thread receiver_thread(receive_pdu, 12345);
         std::thread sender_thread(send_pdu, "127.0.0.1", 12347);
-        std::thread manager_thread(manage_client_requests, "127.0.0.1", 12347);
+        std::thread manager_thread(manage_client_requests, "127.0.0.1", 12347, 100);
         std::thread monitor_thread(send_monitor_data, "127.0.0.1", 12365);
         std::thread cleaner_thread(cleanup_thread, 1);
 

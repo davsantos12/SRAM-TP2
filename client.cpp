@@ -123,6 +123,22 @@ void display_confirmation() {
     std::cout.flush();
 }
 
+void recv_pdu(char *client_id, int type, int sockfd, PDU_2 &pdu_2) {
+    sockaddr_in clientAddr = {};
+    socklen_t clientAddrLen = sizeof(clientAddr);
+
+    while (true) {
+        ssize_t recvd_bytes = recvfrom(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&clientAddr, &clientAddrLen);
+        if (recvd_bytes == -1) {
+            std::cerr << "Failed to receive response from server" << std::endl;
+            break;
+        }
+        if (std::strcmp(pdu_2.sub.client_id, client_id) == 0 && pdu_2.id == type) {
+            break;
+        }
+    }
+}
+
 void still_watching(int period, std::atomic_bool &exit, PDU_2 &pdu_2, char *client_id, std::string input, int sockfd, sockaddr_in serverAddr, ssize_t bytes_sent) {
     auto last_time = std::chrono::steady_clock::now();
     while (!exit) {
@@ -148,8 +164,8 @@ void still_watching(int period, std::atomic_bool &exit, PDU_2 &pdu_2, char *clie
                 if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
+                // recv_pdu(client_id, 5, sockfd, pdu_2);
                 exit.store(true);
-                cv.notify_all();
             }
             confirmation_showing.store(false);
             cv.notify_all();
@@ -169,22 +185,6 @@ void display_sin_value(PDU_2 pdu_2) {
     std::cout << std::endl;
 }
 
-void recv_pdu(char *client_id, int type, int sockfd, PDU_2 &pdu_2) {
-    sockaddr_in clientAddr = {};
-    socklen_t clientAddrLen = sizeof(clientAddr);
-
-    while (true) {
-        ssize_t recvd_bytes = recvfrom(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&clientAddr, &clientAddrLen);
-        if (recvd_bytes == -1) {
-            std::cerr << "Failed to receive response from server" << std::endl;
-            break;
-        }
-        if (std::strcmp(pdu_2.sub.client_id, client_id) == 0 && pdu_2.id == type) {
-            break;
-        }
-    }
-}
-
 void display_channel(PDU_2 &pdu_2, int sockfd, std::string input, char *client_id, std::atomic_bool &exit, sockaddr_in serverAddr, ssize_t bytes_sent) {
     while (!exit) {
         {
@@ -201,6 +201,7 @@ void display_channel(PDU_2 &pdu_2, int sockfd, std::string input, char *client_i
                     if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                         std::cerr << "Failed to send response to client." << std::endl;
                     }
+                    recv_pdu(client_id, 5, sockfd, pdu_2);
                 }
             }
         }
@@ -260,12 +261,14 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *cli
                 if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
+                recv_pdu(client_id, 5, sockfd, pdu_2);
                 system(CLEAR_COMMAND);
                 std::atomic<bool> exit(false);
                 std::thread display_thread(display_channel, std::ref(pdu_2), sockfd, input, client_id, std::ref(exit), serverAddr, bytes_sent);
                 std::thread still_watching_thread(still_watching, 40, std::ref(exit), std::ref(pdu_2), client_id, input, sockfd, serverAddr, bytes_sent);
                 display_thread.join();
                 still_watching_thread.join();
+                std::cout << "joined" << std::endl;
                 break;
             }
             case 4:  // Stop(D)
@@ -275,6 +278,7 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *cli
                 if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
+                recv_pdu(client_id, 5, sockfd, pdu_2);
                 break;
             case 5:  // Quit
                 quit = true;
