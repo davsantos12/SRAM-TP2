@@ -9,7 +9,7 @@ void populate_pdu(PDU_2 &pdu, int id, std::string type, char *client_id, const s
     size_t length;
     size_t max_size;
 
-    memset(&pdu, 0, sizeof(PDU_2));
+    pdu = {};
 
     pdu.id = id;
     length = strlen(type.c_str());
@@ -60,22 +60,23 @@ void display_menu() {
 }
 
 void display_info(PDU_1 pdu_1) {
-    std::this_thread::sleep_for(std::chrono::milliseconds(500));
+    if (pdu_1.identifier[0] != '\0') {
+        std::cout << "------------------------------------" << std::endl;
+        std::cout << "            INFORMATION             " << std::endl;
+        std::cout << "------------------------------------" << std::endl;
+        std::cout << "Identifier: " << pdu_1.identifier << std::endl;
+        std::cout << "Frequency: " << pdu_1.frequency << std::endl;
+        std::cout << "Multiple: " << pdu_1.multiple << std::endl;
+        std::cout << "Max Period: " << pdu_1.max_period << std::endl;
+        std::cout << "------------------------------------" << std::endl;
+        std::cout << "Press ENTER to return.";
+        std::cout.flush();
 
-    std::cout << "------------------------------------" << std::endl;
-    std::cout << "            INFORMATION             " << std::endl;
-    std::cout << "------------------------------------" << std::endl;
-    std::cout << "Identifier: " << pdu_1.identifier << std::endl;
-    std::cout << "Frequency: " << pdu_1.frequency << std::endl;
-    std::cout << "Multiple: " << pdu_1.multiple << std::endl;
-    std::cout << "Max Period: " << pdu_1.max_period << std::endl;
-    std::cout << "------------------------------------" << std::endl;
-    std::cout << "Press ENTER to return.";
-    std::cout.flush();
-
-    while (true) {
-        if (is_key_pressed() && get_char() == '\n') {  // Check for Enter key
-            break;
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+            if (is_key_pressed() && get_char() == '\n') {  // Check for Enter key
+                break;
+            }
         }
     }
 }
@@ -94,17 +95,22 @@ void display_sources(PDU_2 pdu_2) {
     std::cout.flush();
 
     while (true) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        std::this_thread::sleep_for(std::chrono::microseconds(100));
         if (is_key_pressed() && get_char() == '\n') {  // Check for Enter key
             break;
         }
     }
 }
 
-void display_chooser(std::string &input) {
+void display_chooser(std::string &input, PDU_2 pdu_2) {
     std::cout << "------------------------------------" << std::endl;
     std::cout << "           CHOOSE SOURCE            " << std::endl;
     std::cout << "------------------------------------" << std::endl;
+    std::cout << "Available Sources: ";
+    for (size_t i = 0; i < strlen(pdu_2.active_sources); i++) {
+        std::cout << pdu_2.active_sources[i] << " ";
+    }
+    std::cout << std::endl;
     std::cout << "Enter source identifier: ";
     std::cin >> input;
     std::cin.clear();
@@ -123,11 +129,29 @@ void display_confirmation() {
     std::cout.flush();
 }
 
-void recv_pdu(char *client_id, int type, int sockfd, PDU_2 &pdu_2) {
+void recv_pdu(char *client_id, int type, int sockfd, PDU_2 &pdu_2, std::atomic_bool &exit) {
     sockaddr_in clientAddr = {};
     socklen_t clientAddrLen = sizeof(clientAddr);
 
+    fd_set read_set;
+    FD_ZERO(&read_set);
+    FD_SET(sockfd, &read_set);
+
+    struct timeval timeout;
+    timeout.tv_sec = 5;  // Timeout value in seconds
+    timeout.tv_usec = 0;
+
     while (true) {
+        int select_res = select(sockfd + 1, &read_set, nullptr, nullptr, &timeout);
+        if (select_res == -1) {
+            std::cerr << "Failed in socket select" << std::endl;
+            close(sockfd);
+            break;
+        } else if (select_res == 0) {
+            // std::cout << "Timeout occurred." << std::endl;
+            exit.store(true);
+            break;
+        }
         ssize_t recvd_bytes = recvfrom(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&clientAddr, &clientAddrLen);
         if (recvd_bytes == -1) {
             std::cerr << "Failed to receive response from server" << std::endl;
@@ -179,7 +203,7 @@ void still_watching(int period, std::atomic_bool &exit, PDU_2 &pdu_2, char *clie
 }
 
 void display_sin_value(PDU_2 pdu_2) {
-    for (size_t i = 0; i < pdu_2.pdu.value; i++) {
+    for (int i = 0; i < pdu_2.pdu.value; i++) {
         std::cout << "*";
     }
     std::cout << std::endl;
@@ -192,8 +216,8 @@ void display_channel(PDU_2 &pdu_2, int sockfd, std::string input, char *client_i
             // Wait if still watching confirmation is using the screen
             cv.wait(lock, [] { return !confirmation_showing; });
 
-            memset(&pdu_2, 0, sizeof(pdu_2));
-            recv_pdu(client_id, 0, sockfd, pdu_2);
+            pdu_2 = {};
+            recv_pdu(client_id, 0, sockfd, pdu_2, exit);
             if (std::strcmp(pdu_2.sub.source_id, input.c_str()) == 0) {
                 display_sin_value(pdu_2);
                 if (pdu_2.sub.credits < 3) {
@@ -201,7 +225,7 @@ void display_channel(PDU_2 &pdu_2, int sockfd, std::string input, char *client_i
                     if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                         std::cerr << "Failed to send response to client." << std::endl;
                     }
-                    recv_pdu(client_id, 5, sockfd, pdu_2);
+                    recv_pdu(client_id, 5, sockfd, pdu_2, exit);
                 }
             }
         }
@@ -211,6 +235,7 @@ void display_channel(PDU_2 &pdu_2, int sockfd, std::string input, char *client_i
 void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *client_id) {
     int choice;
     bool quit = false;
+    std::atomic<bool> exit(false);
     PDU_2 pdu_2;
     std::string input;
     ssize_t bytes_sent = 0;
@@ -239,46 +264,60 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *cli
                 if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
-                recv_pdu(client_id, choice, sockfd, pdu_2);
+                recv_pdu(client_id, choice, sockfd, pdu_2, exit);
                 display_sources(pdu_2);
                 break;
             case 2:  // Info(D)
                 system(CLEAR_COMMAND);
-                display_chooser(input);
+                populate_pdu(pdu_2, 1, "list", client_id);
+                if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
+                    std::cerr << "Failed to send response to client." << std::endl;
+                }
+                recv_pdu(client_id, 1, sockfd, pdu_2, exit);
+                display_chooser(input, pdu_2);
                 populate_pdu(pdu_2, choice, "info", client_id, "\0", input);
                 if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
-                recv_pdu(client_id, choice, sockfd, pdu_2);
+                recv_pdu(client_id, choice, sockfd, pdu_2, exit);
                 system(CLEAR_COMMAND);
                 display_info(pdu_2.pdu);
                 break;
             case 3:  // Play(D)
             {
+                exit.store(false);
                 system(CLEAR_COMMAND);
-                display_chooser(input);
+                populate_pdu(pdu_2, 1, "list", client_id);
+                if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
+                    std::cerr << "Failed to send response to client." << std::endl;
+                }
+                recv_pdu(client_id, 1, sockfd, pdu_2, exit);
+                display_chooser(input, pdu_2);
                 populate_pdu(pdu_2, choice, "play", client_id, input, "\0");
                 if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
-                recv_pdu(client_id, 5, sockfd, pdu_2);
+                recv_pdu(client_id, 5, sockfd, pdu_2, exit);
                 system(CLEAR_COMMAND);
-                std::atomic<bool> exit(false);
                 std::thread display_thread(display_channel, std::ref(pdu_2), sockfd, input, client_id, std::ref(exit), serverAddr, bytes_sent);
                 std::thread still_watching_thread(still_watching, 40, std::ref(exit), std::ref(pdu_2), client_id, input, sockfd, serverAddr, bytes_sent);
                 display_thread.join();
                 still_watching_thread.join();
-                std::cout << "joined" << std::endl;
                 break;
             }
             case 4:  // Stop(D)
                 system(CLEAR_COMMAND);
-                display_chooser(input);
+                populate_pdu(pdu_2, 1, "list", client_id);
+                if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
+                    std::cerr << "Failed to send response to client." << std::endl;
+                }
+                recv_pdu(client_id, 1, sockfd, pdu_2, exit);
+                display_chooser(input, pdu_2);
                 populate_pdu(pdu_2, choice, "stop", client_id, "\0", input);
                 if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
-                recv_pdu(client_id, 5, sockfd, pdu_2);
+                recv_pdu(client_id, 5, sockfd, pdu_2, exit);
                 break;
             case 5:  // Quit
                 quit = true;

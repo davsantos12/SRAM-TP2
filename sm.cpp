@@ -54,7 +54,7 @@ void send_pdu(const std::string ip, int port) {
     try { /*  Continuously check for new PDUs in the list of processed PDUs
               Identify subscribed clients for each PDU and send the PDU to those clients */
         int sockfd;
-        struct sockaddr_in serverAddr, clientAddr;
+        struct sockaddr_in serverAddr;
         memset(&serverAddr, 0, sizeof(serverAddr));
 
         create_sender_socket(ip, port, sockfd, serverAddr);
@@ -106,12 +106,12 @@ void send_monitor_data(const std::string ip, int port) {
 
         create_sender_socket(ip, port, sockfd, monitorAddr);
 
-        int previous_sources_size = 0;
-        int previous_subscribers_size = 0;
+        size_t previous_sources_size = 0;
+        size_t previous_subscribers_size = 0;
 
         while (keep_running.load()) {
-            int current_sources_size = 0;
-            int current_subscribers_size = 0;
+            size_t current_sources_size = 0;
+            size_t current_subscribers_size = 0;
 
             {
                 std::lock_guard<std::mutex> lock(sources_mutex);
@@ -133,7 +133,7 @@ void send_monitor_data(const std::string ip, int port) {
                 previous_sources_size = current_sources_size;
                 previous_subscribers_size = current_subscribers_size;
             }
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
         close(sockfd);
     } catch (const std::exception& e) {
@@ -171,8 +171,8 @@ void send_ack(PDU_2& pdu_2, int sockfd) {
     } else {
         std::cerr << "Length of type bigger than allowed." << std::endl;
     }
-    bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr*)&pdu_2.sub.clientAddr, sizeof(pdu_2.sub.clientAddr));
-    if (bytes_sent == -1) {
+
+    if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr*)&pdu_2.sub.clientAddr, sizeof(pdu_2.sub.clientAddr))) < 0) {
         std::cerr << "Failed to send response to client." << std::endl;
     }
 }
@@ -191,10 +191,12 @@ void process_request(PDU_2 pdu_2, int sockfd, int credits) {  // Process user re
             break;
         case 2:
             // Looks up for info about the required source
-            memset(&pdu, 0, sizeof(PDU_1));
+            pdu = {};
             {
                 std::lock_guard<std::mutex> lock(sources_mutex);
-                pdu = sources_map[pdu_2.pdu.identifier];
+                if (sources_map.count(pdu_2.pdu.identifier) > 0) {
+                    pdu = sources_map[pdu_2.pdu.identifier];
+                }
             }
             pdu_2.pdu = pdu;
 

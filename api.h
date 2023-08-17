@@ -7,7 +7,9 @@
 #include <arpa/inet.h>
 #include <netinet/in.h>
 #include <sys/ioctl.h>
+#include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/types.h>
 #include <termios.h>
 #include <unistd.h>
 #endif
@@ -36,10 +38,10 @@
 
 // struct declaration
 struct Subscriber {
-    char client_id[10];  // identificador do cliente
-    char source_id[10];  // identificador da source subscrita
-    int credits;
-    struct sockaddr_in clientAddr;
+    char client_id[10];             // identificador do cliente
+    char source_id[10];             // identificador da source subscrita
+    int credits;                    // creditos disponiveis
+    struct sockaddr_in clientAddr;  // informação do cliente
 };
 
 struct PDU_1 {
@@ -51,7 +53,7 @@ struct PDU_1 {
     int multiple;                                     // amostragem
     int max_period;                                   // número máximo de períodos
     std::chrono::system_clock::time_point timestamp;  // timestamp atual
-    bool sent;
+    bool sent;                                        // campo para saber se o PDU foi enviado
 };
 
 struct PDU_2 {
