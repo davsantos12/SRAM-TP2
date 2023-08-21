@@ -39,7 +39,6 @@ void receive_pdu(int port) {
             new_notification.store(true);
             cv.notify_one();
         }
-
         close(sockfd);
     } catch (const std::exception& e) {
         std::cerr << "Exception in received_pdu: " << e.what() << std::endl;
@@ -184,7 +183,7 @@ void process_request(PDU_2 pdu_2, int sockfd, int credits) {  // Process user re
     ssize_t bytes_sent = 0;
     PDU_1 pdu;
     switch (pdu_2.id) {
-        case 1:
+        case 1:  // List sources
             // Looks up for sources available
             get_sources_list(pdu_2);
             bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr*)&pdu_2.sub.clientAddr, sizeof(pdu_2.sub.clientAddr));
@@ -192,7 +191,7 @@ void process_request(PDU_2 pdu_2, int sockfd, int credits) {  // Process user re
                 std::cerr << "Failed to send response to client." << std::endl;
             }
             break;
-        case 2:
+        case 2:  // Get source info
             // Looks up for info about the required source
             pdu = {};
             {
@@ -208,7 +207,7 @@ void process_request(PDU_2 pdu_2, int sockfd, int credits) {  // Process user re
                 std::cerr << "Failed to send response to client." << std::endl;
             }
             break;
-        case 3:
+        case 3:  // Play from source
             // Adds subscriber to subscriber list and notifies sender thread to send to new sub.
             {
                 std::unique_lock<std::mutex> source_lock(sources_mutex);
@@ -230,7 +229,7 @@ void process_request(PDU_2 pdu_2, int sockfd, int credits) {  // Process user re
                 }
             }
             break;
-        case 4:
+        case 4:  // Stop playing from source
             // Removes subscribers
             {
                 std::unique_lock<std::mutex> lock(client_mutex);
