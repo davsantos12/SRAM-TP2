@@ -31,8 +31,6 @@ void receive_pdu(int port) {
                 close(sockfd);
                 return;
             }
-            /* std::cout << "PDU-1: " << std::endl;
-            print_pdu_1(pdu); */
             std::string key(pdu.identifier, strlen(pdu.identifier));
             {
                 std::lock_guard<std::mutex> lock(sources_mutex);
@@ -58,18 +56,18 @@ void send_pdu(const std::string ip, int port) {
         memset(&serverAddr, 0, sizeof(serverAddr));
 
         create_sender_socket(ip, port, sockfd, serverAddr);
-        // std::cout << "socket created with port = " << serverAddr.sin_port << std::endl;
 
         while (keep_running.load()) {
             {
+                std::unordered_set<std::string> sent_pdus;
                 std::unique_lock<std::mutex> lock(sources_mutex);
                 cv.wait(lock, [] { return !sources_map.empty() && !subscriber_list.empty() && new_notification.load(); });
                 std::unique_lock<std::mutex> sub_lock(client_mutex);
-                PDU_2 pdu;
+                PDU_2 pdu = {};
 
                 for (auto& subscriber : subscriber_list) {
-                    auto& source = sources_map[subscriber.second.source_id];
-                    if (source.sent == false && subscriber.second.credits > 0 && pdu.pdu.period != 0) {
+                    auto source = sources_map.find(subscriber.second.source_id);
+                    if (source != sources_map.end() && source->second.sent == false && source->second.period != 0 && subscriber.second.credits > 0) {
                         pdu.id = 0;
                         char type[] = "data";
                         size_t length = strlen(type);
@@ -78,15 +76,20 @@ void send_pdu(const std::string ip, int port) {
                         pdu.pdu = sources_map[subscriber.second.source_id];
                         subscriber.second.credits -= 1;
                         pdu.sub = subscriber.second;
-                        // print_pdu_2(pdu);
                         ssize_t bytes_sent = sendto(sockfd, &pdu, sizeof(pdu), 0, (struct sockaddr*)&subscriber.second.clientAddr, sizeof(subscriber.second.clientAddr));
                         if (bytes_sent == -1) {
                             std::cerr << "Failed to send response to client." << std::endl;
                         }
+                        sent_pdus.insert(subscriber.second.source_id);
                     }
                 }
                 sub_lock.unlock();
-                sources_map[pdu.sub.source_id].sent = true;
+                for (auto& pdu_id : sent_pdus) {
+                    auto source = sources_map.find(pdu_id);
+                    if (source != sources_map.end()) {
+                        source->second.sent = true;
+                    }
+                }
 
                 new_notification.store(false);
             }

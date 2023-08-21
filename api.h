@@ -24,10 +24,12 @@
 #include <fstream>
 #include <iostream>
 #include <mutex>
+#include <set>
 #include <shared_mutex>
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #ifdef _WIN32
@@ -65,8 +67,8 @@ struct PDU_2 {
 };
 
 struct PDU_3 {
-    int n_subscribers;
-    int n_sources;
+    int n_subscribers;  // número de subscritores ativos
+    int n_sources;      // número de fontes ativas
 };
 
 // Helper lambda function to print key-value pairs
