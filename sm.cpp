@@ -240,6 +240,21 @@ void process_request(PDU_2 pdu_2, int sockfd, int credits) {  // Process user re
                 }
             }
             break;
+        case 6:
+            // Get subscribed sources
+            {
+                std::unique_lock<std::mutex> lock(client_mutex);
+                auto subscriber = subscriber_list.find(pdu_2.sub.clientAddr.sin_port);
+                if (subscriber != subscriber_list.end()) {
+                    pdu_2.sub = subscriber->second;
+                    bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr*)&pdu_2.sub.clientAddr, sizeof(pdu_2.sub.clientAddr));
+                    if (bytes_sent == -1) {
+                        std::cerr << "Failed to send response to client." << std::endl;
+                    }
+                }
+                lock.unlock();
+            }
+            break;
         default:
             std::cerr << "Invalid request from client." << std::endl;
     }

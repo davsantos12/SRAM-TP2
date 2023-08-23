@@ -106,9 +106,16 @@ void display_chooser(std::string &input, PDU_2 pdu_2) {
     std::cout << "------------------------------------" << std::endl;
     std::cout << "           CHOOSE SOURCE            " << std::endl;
     std::cout << "------------------------------------" << std::endl;
-    std::cout << "Available Sources: ";
-    for (size_t i = 0; i < strlen(pdu_2.active_sources); i++) {
-        std::cout << pdu_2.active_sources[i] << " ";
+    if (pdu_2.id != 6) {
+        std::cout << "Available Sources: ";
+        for (size_t i = 0; i < strlen(pdu_2.active_sources); i++) {
+            std::cout << pdu_2.active_sources[i] << " ";
+        }
+    } else {
+        std::cout << "Subscribed Sources: ";
+        for (size_t i = 0; i < strlen(pdu_2.sub.source_id); i++) {
+            std::cout << pdu_2.sub.source_id[i] << " ";
+        }
     }
     std::cout << std::endl;
     std::cout << "Enter source identifier: ";
@@ -211,22 +218,21 @@ void display_sin_value(PDU_2 pdu_2) {
 
 void display_channel(PDU_2 &pdu_2, int sockfd, std::string input, char *client_id, std::atomic_bool &exit, sockaddr_in serverAddr, ssize_t bytes_sent) {
     while (!exit) {
-        {
-            std::unique_lock<std::mutex> lock(screen_mutex);
-            // Wait if still watching confirmation is using the screen
-            cv.wait(lock, [] { return !confirmation_showing; });
-
-            pdu_2 = {};
-            recv_pdu(client_id, 0, sockfd, pdu_2, exit);
-            if (std::strcmp(pdu_2.sub.source_id, input.c_str()) == 0) {
+        pdu_2 = {};
+        recv_pdu(client_id, 0, sockfd, pdu_2, exit);
+        if (std::strcmp(pdu_2.sub.source_id, input.c_str()) == 0) {
+            {
+                std::unique_lock<std::mutex> lock(screen_mutex);
+                // Wait if still watching confirmation is using the screen
+                cv.wait(lock, [] { return !confirmation_showing; });
                 display_sin_value(pdu_2);
-                if (pdu_2.sub.credits < 3) {
-                    populate_pdu(pdu_2, 3, "play", client_id, input, "\0");
-                    if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
-                        std::cerr << "Failed to send response to client." << std::endl;
-                    }
-                    recv_pdu(client_id, 5, sockfd, pdu_2, exit);
+            }
+            if (pdu_2.sub.credits < 3) {
+                populate_pdu(pdu_2, 3, "play", client_id, input, "\0");
+                if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
+                    std::cerr << "Failed to send response to client." << std::endl;
                 }
+                recv_pdu(client_id, 5, sockfd, pdu_2, exit);
             }
         }
     }
@@ -254,6 +260,7 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *cli
             std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
             std::cout << "Invalid input, please try again: ";
             std::cin >> choice;
+            std::cin.clear();
         }
 
         // Process user's choice
@@ -307,11 +314,11 @@ void menu_handler(int port, int sockfd, struct sockaddr_in serverAddr, char *cli
             }
             case 4:  // Stop(D)
                 system(CLEAR_COMMAND);
-                populate_pdu(pdu_2, 1, "list", client_id);
+                populate_pdu(pdu_2, 6, "subd", client_id);
                 if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
                     std::cerr << "Failed to send response to client." << std::endl;
                 }
-                recv_pdu(client_id, 1, sockfd, pdu_2, exit);
+                recv_pdu(client_id, 6, sockfd, pdu_2, exit);
                 display_chooser(input, pdu_2);
                 populate_pdu(pdu_2, choice, "stop", client_id, "\0", input);
                 if ((bytes_sent = sendto(sockfd, &pdu_2, sizeof(pdu_2), 0, (struct sockaddr *)&serverAddr, sizeof(serverAddr))) == -1) {
